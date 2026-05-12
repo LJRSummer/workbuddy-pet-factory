@@ -274,9 +274,10 @@ class PetWidget(QWidget):
             anim = "running"
         if anim is None:
             anim = "idle"
+        # loop 状态（running/waiting/review/idle）持续展示，直到 WorkBuddy 状态变化；
+        # once 状态（jumping/waving）由 _next_frame 播完后自动 fallback。
+        # 因此这里直接 set_state 即可，不再加 1.2s 强制切回 idle 的定时器。
         self.set_state(anim, fallback="idle")
-        if anim in ("running", "waiting", "review"):
-            QTimer.singleShot(1200, lambda: self.set_state("idle"))
 
     def paintEvent(self, event):
         row, count, _ = self.cfg.layout[self.current_state]
