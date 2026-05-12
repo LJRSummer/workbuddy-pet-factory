@@ -120,6 +120,7 @@ class WorkBuddyWatcher(QObject):
         super().__init__()
         self._last_status: Optional[str] = None
         self._last_auto: bool = False
+        self._last_session_id: Optional[str] = None
 
     def poll(self) -> Optional[WBSnapshot]:
         if not DB_PATH.exists():
@@ -127,21 +128,24 @@ class WorkBuddyWatcher(QObject):
         try:
             conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=1.0)
             cur = conn.cursor()
-            cutoff = int((time.time() - 60) * 1000)
+            # 直接取最新一条未删会话的状态——不再设 60s 窗口，
+            # 否则长时间 working 但 updated_at 不动的会话会被判成 idle。
             cur.execute(
                 """
                 SELECT id, title, status, updated_at FROM sessions
-                WHERE deleted_at IS NULL AND updated_at >= ?
+                WHERE deleted_at IS NULL
                 ORDER BY updated_at DESC LIMIT 1
-                """,
-                (cutoff,),
+                """
             )
             row = cur.fetchone()
             session_id, title, status, _ = row if row else (None, None, None, None)
             cur.execute("SELECT COUNT(*) FROM automation_runtime_state WHERE running=1")
             running_auto = cur.fetchone()[0] > 0
             conn.close()
-            return WBSnapshot(status, title, running_auto, time.time())
+            snap = WBSnapshot(status, title, running_auto, time.time())
+            # 把 session_id 一起带过去，便于 tick 比较
+            snap.session_id = session_id  # type: ignore[attr-defined]
+            return snap
         except Exception as e:
             print(f"[wb-pet] poll failed: {e}", file=sys.stderr)
             return None
@@ -150,9 +154,11 @@ class WorkBuddyWatcher(QObject):
         snap = self.poll()
         if snap is None:
             return
-        key = (snap.active_status, snap.has_running_automation)
-        last_key = (self._last_status, self._last_auto)
+        sid = getattr(snap, "session_id", None)
+        key = (sid, snap.active_status, snap.has_running_automation)
+        last_key = (self._last_session_id, self._last_status, self._last_auto)
         if key != last_key:
+            self._last_session_id = sid
             self._last_status = snap.active_status
             self._last_auto = snap.has_running_automation
             self.snapshot_changed.emit(snap)
