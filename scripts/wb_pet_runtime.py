@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sqlite3
 import sys
 import time
@@ -303,6 +304,40 @@ class PetWidget(QWidget):
     def mouseDoubleClickEvent(self, event):
         self.set_state("waving", fallback="idle")
 
+    def _list_installed_pets(self) -> list[tuple[str, str]]:
+        """返回 [(pet_id, display_name), ...]，按 id 排序。"""
+        out = []
+        if not PETS_ROOT.exists():
+            return out
+        for sub in sorted(PETS_ROOT.iterdir()):
+            if not sub.is_dir() or sub.name.startswith("."):
+                continue
+            pid = sub.name
+            name = pid
+            cfg = sub / "pet.json"
+            if cfg.exists():
+                try:
+                    name = json.loads(cfg.read_text(encoding="utf-8")).get("displayName", pid)
+                except Exception:
+                    pass
+            out.append((pid, name))
+        return out
+
+    def _switch_to(self, pet_id: str):
+        """调 pet_ctl.sh switch <id>；脚本会停掉当前进程再起目标。"""
+        if pet_id == self.cfg.pet_id:
+            return
+        ctl = Path(__file__).resolve().parent / "pet_ctl.sh"
+        try:
+            subprocess.Popen(
+                ["bash", str(ctl), "switch", pet_id],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as e:
+            print(f"[wb-pet:{self.cfg.pet_id}] switch failed: {e}", flush=True)
+
     def _show_menu(self, pos):
         menu = QMenu(self)
         menu.addAction(f"🐾 {self.cfg.display_name} ({self.cfg.pet_id})").setEnabled(False)
@@ -312,10 +347,32 @@ class PetWidget(QWidget):
         status = self.last_wb_snapshot.active_status if self.last_wb_snapshot else "—"
         menu.addAction(f"状态: {status}  →  {self.current_state}").setEnabled(False)
         menu.addSeparator()
+
+        # 切换宠物子菜单
+        installed = self._list_installed_pets()
+        switch_menu = menu.addMenu("🔄 切换宠物")
+        if len(installed) <= 1:
+            empty = QAction("（没有其它桌宠，先用 install_pet.py 安装）", self)
+            empty.setEnabled(False)
+            switch_menu.addAction(empty)
+        else:
+            for pid, name in installed:
+                if pid == self.cfg.pet_id:
+                    cur = QAction(f"★ {name}（当前）", self)
+                    cur.setEnabled(False)
+                    switch_menu.addAction(cur)
+                else:
+                    act = QAction(f"切到 {name}", self)
+                    act.triggered.connect(lambda _=False, p=pid: self._switch_to(p))
+                    switch_menu.addAction(act)
+
+        # 手动切动作子菜单
+        action_menu = menu.addMenu("🎬 切换动作")
         for state in ["idle", "waving", "jumping", "running", "waiting", "review", "running-right", "running-left", "failed"]:
-            act = QAction(f"切换 · {state}", self)
+            act = QAction(state, self)
             act.triggered.connect(lambda _=False, s=state: self.set_state(s, fallback="idle"))
-            menu.addAction(act)
+            action_menu.addAction(act)
+
         menu.addSeparator()
         hide_act = QAction("隐藏 30 秒", self)
         hide_act.triggered.connect(self._hide_temp)
