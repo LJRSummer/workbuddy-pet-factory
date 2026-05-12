@@ -1,6 +1,6 @@
 ---
 name: workbuddy-pet-factory
-description: WorkBuddy 桌宠工厂 —— 给一张角色图、一个 codex.pet 链接、或一份现成的精灵表，就能自动创建一只可联动 WorkBuddy 状态的桌面宠物。当用户说"创建桌宠"、"做一只桌宠"、"用这张图做桌宠"、"从 codex.pet 安装桌宠"、"召唤新桌宠"、"启动 XX 桌宠"、"停止 XX 桌宠"、"切换到 XX 桌宠"、"换成 XX"、"列出所有桌宠"等，使用此 skill 安装/启停/切换/管理桌宠。桌面强制单例，同一时刻只保留一只在跑，start/switch 会自动停掉其它。安装后桌宠会读取 ~/.workbuddy/workbuddy.db 的会话与自动化状态，自动切换挥手/思考/等待/庆祝/沮丧动画，且不抢键盘焦点、切 app 不消失（macOS）。
+description: WorkBuddy 桌宠工厂 —— 给一张角色图、一个 codex.pet 链接、一条 codex-pets.net 下载 URL、或一份现成的精灵表，就能自动创建一只可联动 WorkBuddy 状态的桌面宠物。当用户说"创建桌宠"、"做一只桌宠"、"用这张图做桌宠"、"从 codex.pet 安装桌宠"、"导入 codex 桌宠 XX"、"装一下 codex-pets.net 上的 XX"、"召唤新桌宠"、"启动 XX 桌宠"、"停止 XX 桌宠"、"切换到 XX 桌宠"、"换成 XX"、"列出所有桌宠"等，或者用户**直接粘贴一条 `curl ... codex-pets.net/api/pets/<id>/download...` 命令**时，使用此 skill 自动完成下载/解压/安装/启动一条龙。桌面强制单例，同一时刻只保留一只在跑，start/switch 会自动停掉其它。安装后桌宠会读取 ~/.workbuddy/workbuddy.db 的会话与自动化状态，自动切换挥手/思考/等待/庆祝/沮丧动画，且不抢键盘焦点、切 app 不消失（macOS）。
 agent_created: true
 ---
 
@@ -12,7 +12,8 @@ agent_created: true
 
 - 创建桌宠 / 做一只桌宠 / 安装桌宠
 - 用这张图做桌宠 / 用 XXX 做桌宠
-- 从 codex.pet 安装 / 导入 codex 桌宠 XX
+- 从 codex.pet 安装 / 导入 codex 桌宠 XX / 装一下 codex-pets.net 上的 XX
+- 用户直接粘贴 `curl ... codex-pets.net/api/pets/<id>/download...`（**自动触发 import_codex.sh**）
 - 启动 XX 桌宠 / 召唤 XX / 让 XX 上班
 - 停止 XX 桌宠 / 让 XX 休息 / 收起 XX
 - 切换到 XX / 换成 XX / 把桌宠换成 XX / 现在让 XX 出来
@@ -26,6 +27,7 @@ agent_created: true
 ├── SKILL.md
 ├── scripts/
 │   ├── install_pet.py      # 安装/创建（4 种来源）
+│   ├── import_codex.sh     # 一键 codex-pets.net 导入：下载→解压→安装→启动
 │   ├── wb_pet_runtime.py   # 通用桌宠引擎
 │   └── pet_ctl.sh          # 启停/状态/列表
 └── references/             # 设计参考
@@ -39,7 +41,27 @@ agent_created: true
     └── pet.log
 ```
 
-## 安装来源（4 种）
+## 安装来源（4 种 + 一键 codex-pets.net）
+
+### ⚡️ 一键导入 codex-pets.net（推荐）
+
+只要用户给了一个 codex-pets.net 上的桌宠 id（或直接粘 curl），就用这个：
+
+```bash
+SK=~/.workbuddy/skills/workbuddy-pet-factory/scripts
+bash $SK/import_codex.sh <pet_id> [<download_url>] [--name <DisplayName>] [--no-start]
+
+# 示例
+bash $SK/import_codex.sh xiaoba                                              # 用默认 URL
+bash $SK/import_codex.sh xiaoba "https://codex-pets.net/api/pets/xiaoba/download?v=1778..."
+bash $SK/import_codex.sh xiaoba --name "小八"
+```
+
+它一键完成：下载 zip → 解压到 `~/.codex/pets/<id>` → `install_pet.py --from-codex` → `pet_ctl.sh start`（同时自动停掉当前其它桌宠）。
+
+> **触发规则**：用户**粘贴 `curl ... codex-pets.net/api/pets/<id>/download...` 命令**或说"装一下 codex-pets.net 上的 XX / 导入 codex 桌宠 XX"时，**直接调 `import_codex.sh <id> <URL>`**，不要分步执行 curl + install。
+
+### 4 种通用来源
 
 ```bash
 PY=/opt/miniconda3/bin/python3
