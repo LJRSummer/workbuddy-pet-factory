@@ -107,8 +107,12 @@ def install_from_sheet(sheet_path: Path, pet_id: str | None, display_name: str |
     return target
 
 
-def install_from_image(image_path: Path, pet_id: str | None, display_name: str | None) -> Path:
-    """图片来源：仅落盘资料，提示调用方用 hatch-pet 工作流生成 spritesheet。"""
+def install_from_image(image_path: Path, pet_id: str | None, display_name: str | None,
+                        auto_hatch: bool = False) -> Path:
+    """图片来源：仅落盘资料，提示调用方用 hatch-pet 工作流生成 spritesheet。
+
+    auto_hatch=True 时直接调用 hatch_bridge.sh，让 hatch-pet 接管生成。
+    """
     if not image_path.exists():
         raise FileNotFoundError(image_path)
     pid = pet_id or slugify(image_path.stem)
@@ -121,10 +125,24 @@ def install_from_image(image_path: Path, pet_id: str | None, display_name: str |
                    description=f"Pending sprite generation from {ref.name}",
                    extra={"_needs_sprite": True})
     print("\n[factory] 已保存参考图：", ref)
+
+    if auto_hatch:
+        bridge = Path(__file__).parent / "hatch_bridge.sh"
+        if bridge.exists():
+            print(f"[factory] --auto-hatch 已开启，调用 hatch_bridge.sh ...")
+            import subprocess
+            args = ["bash", str(bridge), pid, str(ref)]
+            if display_name:
+                args += ["--name", display_name]
+            args.append("--no-start")
+            subprocess.run(args, check=False)
+            return target
+
     print("[factory] 接下来需要由 agent 调用 hatch-pet skill 生成 9 状态精灵表：")
     print(f"           输出路径必须为：{target / 'spritesheet.webp'}")
     print("           规格：9 行 × 8 列，每帧 192×208，总尺寸 1536×1872")
     print("           状态顺序：idle / run-R / run-L / wave / jump / fail / wait / run / review")
+    print(f"           推荐：bash {Path(__file__).parent}/hatch_bridge.sh {pid} {ref}")
     return target
 
 
@@ -140,6 +158,10 @@ def main():
     ap.add_argument("--frame-w", type=int, default=192)
     ap.add_argument("--frame-h", type=int, default=208)
     ap.add_argument("--cols", type=int, default=8)
+    ap.add_argument("--auto-hatch", action="store_true",
+                    help="--from-image 模式下自动调 hatch_bridge.sh 启动 hatch-pet")
+    ap.add_argument("--validate", action="store_true",
+                    help="安装后立刻校验 sprite（--from-codex/url/sheet 推荐开启）")
     args = ap.parse_args()
 
     if args.from_codex:
@@ -152,12 +174,21 @@ def main():
                                      args.frame_w, args.frame_h, args.cols)
     elif args.from_image:
         target = install_from_image(Path(args.from_image).expanduser(),
-                                     args.pet_id, args.name)
+                                     args.pet_id, args.name,
+                                     auto_hatch=args.auto_hatch)
     else:
         ap.error("must specify a source")
         return 2
 
     print(f"\n[factory] ✅ 桌宠已安装到 {target}")
+
+    if args.validate:
+        validator = Path(__file__).parent / "validate_pet.py"
+        if validator.exists():
+            print(f"[factory] 校验中 ...")
+            import subprocess
+            subprocess.run([sys.executable, str(validator), target.name], check=False)
+
     print(f"[factory] 启动：bash {Path(__file__).parent / 'pet_ctl.sh'} start {target.name}")
     return 0
 

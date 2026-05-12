@@ -155,6 +155,97 @@ cmd_list() {
   done
 }
 
+cmd_remove() {
+  local id="$1"
+  [ -n "$id" ] || { echo "需要 pet_id"; exit 2; }
+  local d; d=$(pet_dir "$id")
+  [ -d "$d" ] || { echo "[$id] 不存在"; exit 3; }
+  # 先停掉
+  if pid=$(is_running "$(pid_file "$id")"); then
+    cmd_stop "$id"
+  fi
+  rm -rf "$d"
+  if [ -f "$ACTIVE_FILE" ] && [ "$(cat "$ACTIVE_FILE" 2>/dev/null)" = "$id" ]; then
+    rm -f "$ACTIVE_FILE"
+  fi
+  echo "[$id] 已删除"
+}
+
+cmd_doctor() {
+  # 体检：依赖 / 数据库 / 桌宠目录 / sprite / 进程 / 日志
+  local id="${1:-}"
+  echo "===== WorkBuddy Pet Factory · Doctor ====="
+  echo
+  echo "[1/5] 运行环境"
+  echo "  Python: $PYTHON_BIN"
+  if "$PYTHON_BIN" -c "import PySide6, sys; print('   PySide6:', PySide6.__version__)" 2>/dev/null; then :; else
+    echo "  ⚠️  PySide6 未安装"
+  fi
+  if [ "$(uname -s)" = "Darwin" ]; then
+    if "$PYTHON_BIN" -c "import objc, AppKit" 2>/dev/null; then
+      echo "   pyobjc:  ok"
+    else
+      echo "  ⚠️  pyobjc 未安装（macOS 焦点策略需要）"
+    fi
+  fi
+  if "$PYTHON_BIN" -c "from PIL import Image" 2>/dev/null; then
+    echo "   Pillow:  ok"
+  else
+    echo "  ⚠️  Pillow 未安装（校验需要）"
+  fi
+
+  echo
+  echo "[2/5] WorkBuddy 数据库"
+  local db="$HOME/.workbuddy/workbuddy.db"
+  if [ -f "$db" ]; then
+    echo "  $db ($(stat -f%z "$db" 2>/dev/null || stat -c%s "$db") bytes)"
+    if command -v sqlite3 >/dev/null; then
+      sqlite3 "$db" "SELECT '   最新 session: ' || COALESCE(status,'?') || '  id=' || COALESCE(id,'?') FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1;" 2>/dev/null
+      sqlite3 "$db" "SELECT '   自动化在跑: ' || COALESCE(SUM(running),0) FROM automation_runtime_state;" 2>/dev/null
+    fi
+  else
+    echo "  ⚠️  数据库不存在，桌宠状态联动会失效"
+  fi
+
+  echo
+  echo "[3/5] 已安装桌宠"
+  if [ -d "$PETS_ROOT" ]; then
+    cmd_list | sed 's/^/  /'
+  else
+    echo "  (无)"
+  fi
+
+  echo
+  echo "[4/5] 校验"
+  if [ -n "$id" ]; then
+    "$PYTHON_BIN" "$SCRIPT_DIR/validate_pet.py" "$id" 2>&1 | sed 's/^/  /' || true
+  else
+    if [ -d "$PETS_ROOT" ]; then
+      for d in "$PETS_ROOT"/*/; do
+        [ -d "$d" ] || continue
+        local pid; pid=$(basename "$d")
+        echo "  --- $pid ---"
+        "$PYTHON_BIN" "$SCRIPT_DIR/validate_pet.py" "$pid" 2>&1 | grep -E '"ok"|"errors"|"warnings"' | sed 's/^/    /' || true
+      done
+    fi
+  fi
+
+  echo
+  echo "[5/5] 最近日志"
+  if [ -n "$id" ]; then
+    local lf; lf=$(log_file "$id")
+    if [ -f "$lf" ]; then
+      tail -n 10 "$lf" | sed 's/^/  /'
+    else
+      echo "  (无 $id 日志)"
+    fi
+  else
+    echo "  指定 pet_id 才显示日志：bash $0 doctor <pet_id>"
+  fi
+  echo
+  echo "===== 完成 ====="
+}
+
 case "${1:-}" in
   start)    cmd_start "$2" ;;
   stop)     cmd_stop "$2" ;;
@@ -164,6 +255,8 @@ case "${1:-}" in
   switch|use) cmd_switch "$2" ;;
   active)   cmd_active ;;
   stop-all) cmd_stop_all ;;
-  *)        echo "用法: $0 start|stop|switch|restart|status|list|active|stop-all [pet_id]"; exit 2 ;;
+  remove|rm|uninstall) cmd_remove "$2" ;;
+  doctor|check) cmd_doctor "$2" ;;
+  *)        echo "用法: $0 start|stop|switch|restart|status|list|active|stop-all|remove|doctor [pet_id]"; exit 2 ;;
 esac
 
